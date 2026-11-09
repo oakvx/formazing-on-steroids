@@ -83,10 +83,10 @@ async def resume_unsent_telegram(journal, operation_id, actor, training_service)
     record = journal.get(operation_id, include_metadata=True)
     if not record or record['action'] != 'notification':
         raise InvalidTransition('Solo una calendarizzazione può completare Telegram.')
-    if record['status'] != 'ready_telegram' or record['checkpoint'] != 'telegram_not_started':
+    if record['status'] not in ('ready_telegram', 'needs_review') or record['checkpoint'] != 'telegram_not_started':
         raise InvalidTransition('Telegram potrebbe già essere stato contattato.')
     journal.claim(
-        operation_id, actor, status='ready_telegram',
+        operation_id, actor, status=record['status'],
         checkpoint='telegram_not_started', next_checkpoint='telegram_attempted',
     )
     try:
