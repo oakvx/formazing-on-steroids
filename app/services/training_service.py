@@ -420,7 +420,7 @@ class TrainingService:
             logger.error(f"Errore in generate_feedback_preview: {e}")
             raise TrainingServiceError(f"Errore generazione preview feedback: {e}")
     
-    async def send_feedback_request(self, training_id: str, custom_messages: Dict[str, str] = None) -> Dict:
+    async def send_feedback_request(self, training_id: str, custom_messages: Dict[str, str] = None, progress=None) -> Dict:
         """
         Invia richiesta feedback post-formazione con supporto a messaggi personalizzati.
         
@@ -441,10 +441,21 @@ class TrainingService:
             if training.get('Stato') != 'Calendarizzata':
                 raise TrainingServiceError(f"Formazione non ancora calendarizzata. Stato attuale: {training.get('Stato')}")
 
+            if progress:
+                progress.step('validated')
             feedback_link = self._generate_feedback_link()
 
-            # Passiamo i messaggi personalizzati (se presenti)
+            # Mark before the first external message. A partial batch needs
+            # manual review rather than a second send to all recipients.
+            if progress:
+                progress.step('telegram_attempted')
             send_results = await self.telegram_service.send_feedback_notification(training, feedback_link, custom_messages)
+            if not all(send_results.values()):
+                raise TrainingServiceError(
+                    'Feedback Telegram parziale o incerto: controlla i gruppi; nessun reinvio automatico.'
+                )
+            if progress:
+                progress.step('feedback_notion_pending')
 
             await self.notion_service.update_formazione(training_id, {
                 'Stato': 'Conclusa'
@@ -457,6 +468,8 @@ class TrainingService:
             }
             
             logger.info(f"Workflow feedback completato: {training.get('Nome', 'N/A')} | Gruppi notificati: {len(send_results)}")
+            if progress:
+                progress.complete()
             return result
             
         except NotionServiceError as e:
