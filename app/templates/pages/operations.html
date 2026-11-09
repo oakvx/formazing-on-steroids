@@ -29,7 +29,7 @@
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button type="submit" class="btn btn-warning">Riconcilia solo Notion</button>
     </form>
-    {% elif selected.status == 'ready_telegram' and selected.checkpoint == 'telegram_not_started' %}
+    {% elif selected.status in ('ready_telegram', 'needs_review') and selected.checkpoint == 'telegram_not_started' %}
     <form method="post" action="{{ url_for('main.resume_operation_telegram', operation_id=selected.id) }}"
           onsubmit="return confirm('Inviare ORA Telegram con i template standard? Il registro certifica che questo passaggio non è stato tentato. Nessun testo personalizzato viene recuperato.');" class="mb-3">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
