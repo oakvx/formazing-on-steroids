@@ -273,7 +273,7 @@ class LogService:
         # viewer and downloaded text. Logging should also avoid secrets.
         secret_pattern = re.compile(
             r'(?i)\b(authorization|bearer|client_secret|password|'
-            r'access_token|refresh_token|api[_-]?key)\b(\s*[:=]\s*|\s+)([^\s,;&]+)'
+            r'access_token|refresh_token|token|api[_-]?key)\b(\s*[:=]\s*|\s+)([^\s,;&]+)'
         )
 
         def add_event(event, in_range, event_level):
