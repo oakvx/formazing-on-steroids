@@ -497,6 +497,64 @@ async def sync_attendance(training_id):
         return redirect(url_for('main.dashboard'))
 
 
+
+# --- CENTRO OPERAZIONI: journal persistente / recovery selettivo ---
+
+@main.route('/operations')
+@admin_required
+def operations():
+    journal = OperationJournal.configured()
+    operation_id = request.args.get('id', '')[:64]
+    selected = journal.get(operation_id) if operation_id else None
+    events = journal.events(operation_id) if selected else []
+    return render_template(
+        'pages/operations.html',
+        records=journal.recent(),
+        selected=selected,
+        events=events,
+        title='Centro Operazioni - Formazing',
+    )
+
+
+@main.route('/operations/<operation_id>/reconcile-notion', methods=['POST'])
+@admin_required
+async def reconcile_operation_notion(operation_id):
+    """Retry only Notion after checking its remote state and persisted receipt."""
+    actor = session['user'].get('preferred_username', '').casefold()
+    try:
+        journal = OperationJournal.configured()
+        await reconcile_notion(
+            journal, operation_id, actor, TrainingService.get_instance()
+        )
+        cache.delete('dashboard_data_notion')
+        flash('Notion riconciliato. Verifica lo stato e i passaggi ancora pendenti.', 'success')
+    except (InvalidTransition, ValueError) as exc:
+        flash(str(exc), 'warning')
+    except Exception:
+        logger.exception('Riconciliazione Notion non completata')
+        flash('Operazione bloccata: controlla la situazione su Notion e nei provider.', 'error')
+    return redirect(url_for('main.operations', id=operation_id))
+
+
+@main.route('/operations/<operation_id>/resume-telegram', methods=['POST'])
+@admin_required
+async def resume_operation_telegram(operation_id):
+    """Never resend a batch whose outcome is already attempted or unknown."""
+    actor = session['user'].get('preferred_username', '').casefold()
+    try:
+        journal = OperationJournal.configured()
+        results = await resume_unsent_telegram(
+            journal, operation_id, actor, TrainingService.get_instance()
+        )
+        flash(f'Invio completato per {len(results)} gruppi. Nessun batch ripetuto.', 'success')
+    except (InvalidTransition, ValueError) as exc:
+        flash(str(exc), 'warning')
+    except Exception:
+        logger.exception('Invio Telegram da recovery non completato')
+        flash('Invio incerto. Verifica direttamente Telegram prima di qualsiasi intervento.', 'error')
+    return redirect(url_for('main.operations', id=operation_id))
+
+
 # --- API ENDPOINT: LOG VIEWER ---
 
 @main.route('/api/logs')
