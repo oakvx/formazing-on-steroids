@@ -92,10 +92,11 @@
             {% else %}
             {% set text = 'Aggiorna' %}
             {% endif %}
-            {% set icon = none %}
-            {% set size = 'btn-sm' %}
-            {% set onclick = "triggerSync('" ~ formazione.get('_notion_id', '') ~ "')" %}
-            {% include 'atoms/button.html' %}
+            <form method="POST" action="{{ url_for('main.sync_attendance', training_id=formazione.get('_notion_id', '')) }}"
+                  onsubmit="return confirm('Sincronizzare le presenze da Microsoft Teams?');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-jemore-verde btn-sm">{{ text }}</button>
+            </form>
             {% endif %}
             {% else %}
             <!-- Messaggio Sola Lettura per non-admin -->
@@ -134,18 +135,4 @@
         };
     }
 
-    if (typeof triggerSync !== 'function') {
-        window.triggerSync = function (trainingId) {
-            // Nasconde le azioni per feedback immediato
-            const actionsEl = document.getElementById(`actions-${trainingId}`);
-            if (actionsEl) actionsEl.classList.add('d-none');
-            
-            const targetUrl = `/sync-attendance/${trainingId}`;
-            const title = 'Sincronizzazione Presenze';
-            const message = 'Connessione a Microsoft Graph e recupero report presenze da Teams...';
-            
-            const loadingUrl = `/loading?next=${encodeURIComponent(targetUrl)}&title=${encodeURIComponent(title)}&message=${encodeURIComponent(message)}`;
-            window.location.href = loadingUrl;
-        };
-    }
 </script>
