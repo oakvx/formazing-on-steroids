@@ -78,7 +78,7 @@ trovare le corrispondenze: non è un motore di ricerca indicizzato.
 
 ```sh
 python -m pip install Flask==3.1.2 pytest==8.4.2
-python -m pytest -q -o addopts= tests/security/test_security_controls.py
+python -m pytest -q -o addopts= --confcutdir=tests/security tests/security/test_security_controls.py
 python -m compileall -q app config.py run.py
 ```
 
