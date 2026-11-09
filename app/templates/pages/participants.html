@@ -1,0 +1,29 @@
+{% extends "layout/auth_required.html" %}
+
+{% block page_content %}
+<a href="{{ url_for('main.calendar_page') }}" class="btn btn-sm btn-outline-secondary mb-3">Torna al calendario</a>
+<div class="card-jemore p-4">
+    <h1 class="h3 text-blu-jemore mb-2"><i class="bi bi-people me-2"></i>Partecipanti</h1>
+    <h2 class="h5 fw-bold">{{ training.get('Nome', 'Formazione') }}</h2>
+    <dl class="row mt-4">
+        <dt class="col-sm-4">Data e ora</dt><dd class="col-sm-8">{{ training.get('Data/Ora') or 'Non disponibile' }}</dd>
+        <dt class="col-sm-4">Area</dt><dd class="col-sm-8">{{ training.get('Area')|join(', ') if training.get('Area') is iterable and training.get('Area') is not string else training.get('Area', 'N/A') }}</dd>
+        <dt class="col-sm-4">Stato</dt><dd class="col-sm-8">{{ training.get('Stato') }}</dd>
+        <dt class="col-sm-4">Numero partecipanti registrati</dt>
+        <dd class="col-sm-8">{{ training.get('Numero Partecipanti') if training.get('Numero Partecipanti') is not none else 'Non ancora sincronizzati' }}</dd>
+        <dt class="col-sm-4">Partecipanti Notion</dt>
+        <dd class="col-sm-8" style="overflow-wrap:anywhere">{{ training.get('Partecipanti') or 'Nessun partecipante registrato' }}</dd>
+        <dt class="col-sm-4">Durata presenze</dt>
+        <dd class="col-sm-8">{{ training.get('Durata') if training.get('Durata') is not none else 'Non disponibile' }}</dd>
+    </dl>
+    <p class="text-muted small">I dati di presenza provengono da Notion e da una precedente sincronizzazione Microsoft Teams.
+        Nessuna sincronizzazione viene eseguita automaticamente aprendo questa pagina.</p>
+    {% if training.get('Stato') == 'Conclusa' %}
+    <form method="POST" action="{{ url_for('main.sync_attendance', training_id=training.get('_notion_id') or training.get('id')) }}"
+          onsubmit="return confirm('Recuperare nuovamente le presenze Teams e aggiornare Notion?');">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-jemore-dark-blu">Sincronizza presenze da Teams</button>
+    </form>
+    {% endif %}
+</div>
+{% endblock %}
