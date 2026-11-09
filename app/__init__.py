@@ -10,9 +10,10 @@ Configurazione centralizzata dell'applicazione Flask con:
 - Logging configurato
 """
 
-from flask import Flask, session
+from flask import Flask, session, request
 from flask_caching import Cache
 from config import proteus, setup_logging
+from app.security import csrf_token, verify_csrf
 import logging
 
 # Inizializza il sistema di Caching
@@ -36,8 +37,38 @@ def create_app():
     app = Flask(__name__)
     
     # Carica configurazione critica per Flask da Proteus
-    app.config['SECRET_KEY'] = proteus.get('FLASK.SECRET_KEY', 'dev-secret-key')
-    app.config['DEBUG'] = proteus.get('FLASK.DEBUG_MODE', False, cast=bool)
+    secret = proteus.get('FLASK.SECRET_KEY')
+    # Flask's cookie session is signed using this secret. The previous
+    # 'dev-secret-key' default allowed anyone to forge the admin flag.
+    if not isinstance(secret, str) or len(secret) < 32 or secret in (
+        'dev-secret-key', 'change-me', 'changeme',
+    ):
+        raise RuntimeError('FLASK__SECRET_KEY must be a random string of at least 32 characters.')
+    app.config.update(
+        SECRET_KEY=secret,
+        DEBUG=proteus.get('FLASK.DEBUG_MODE', False, cast=bool),
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE='Lax',
+        SESSION_COOKIE_SECURE=proteus.get('FLASK.SESSION_COOKIE_SECURE', False, cast=bool),
+        MAX_CONTENT_LENGTH=512 * 1024,
+    )
+
+    @app.before_request
+    def protect_unsafe_requests():
+        if request.method in ('POST', 'PUT', 'PATCH', 'DELETE'):
+            verify_csrf()
+
+    @app.after_request
+    def apply_security_headers(response):
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+        response.headers['X-Frame-Options'] = 'DENY'
+        response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+        response.headers['Content-Security-Policy'] = (
+            "frame-ancestors 'none'; base-uri 'self'; object-src 'none'; form-action 'self'"
+        )
+        if not request.path.startswith('/static/'):
+            response.headers['Cache-Control'] = 'no-store'
+        return response
     
     # Inizializza la cache con l'app
     cache.init_app(app)
@@ -51,7 +82,8 @@ def create_app():
         return {
             'current_user': user,
             'is_admin': session.get('is_admin', False),
-            'app_name': 'Formazing'
+            'app_name': 'Formazing',
+            'csrf_token': csrf_token
         }
 
     # Registra le rotte (Blueprint principale)
