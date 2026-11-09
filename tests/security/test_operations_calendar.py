@@ -294,3 +294,19 @@ def test_journal_does_not_change_permissions_on_existing_parent(tmp_path):
     db = OperationJournal(parent / 'operations.sqlite3')
     assert (parent.stat().st_mode & 0o777) == before
     assert (db.db_path.stat().st_mode & 0o777) == 0o600
+
+
+def test_pre_send_failure_allows_one_explicit_telegram_dispatch(tmp_path):
+    db, attempt, services = setup_notion_failure(tmp_path, {
+        'Stato': 'Calendarizzata', 'Codice': 'ABC-001',
+        'Link Teams': 'https://teams.test/meeting',
+        'Nome': 'Sessione IT', 'Area': ['IT'],
+    })
+    attempt.step('telegram_not_started')
+    attempt.review()
+    assert db.get(attempt.id)['status'] == 'needs_review'
+    asyncio.run(recovery.resume_unsent_telegram(
+        db, attempt.id, 'admin@example.it', services
+    ))
+    assert db.get(attempt.id)['status'] == 'completed'
+    assert services.telegram_service.calls == 1
