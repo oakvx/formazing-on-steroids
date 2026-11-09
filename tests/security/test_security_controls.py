@@ -138,4 +138,10 @@ def test_route_and_template_regressions():
     assert 'next_url|safe' not in loading
     assert 'name="csrf_token"' in confirmation
     assert 'name="csrf_token"' in row
+    assert "url_for('main.preview_notification_page'" in row
+    assert "url_for('main.preview_feedback_page'" in row
+    assert 'showPreview(' not in row
     assert 'get_filtered_logs' in routes and 'len(query) > 100' in routes
+    requirements = (ROOT / 'requirements.txt').read_text()
+    assert 'python-telegram-bot==22.4' in requirements
+    assert '\ntelegram==0.0.1' not in requirements
