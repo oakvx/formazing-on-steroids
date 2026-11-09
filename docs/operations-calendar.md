@@ -65,6 +65,15 @@ Una riconciliazione interrotta o un checkpoint `*_attempted` non
 autorizza altri invii. L'amministratore deve controllare i sistemi
 esterni e documentare l'esito prima di qualsiasi intervento manuale.
 
+**Concorrenza codici formazione:** il legacy `sequence_counter.txt` è ancora
+un contatore a file privo di lock interprocesso. Il journal previene le
+doppie conferme della **stessa** formazione, ma non garantisce codici
+sequenziali univoci se **formazioni diverse** vengono inviate da worker
+multipli nello stesso istante. Fino alla migrazione del contatore a una
+sequenza transazionale, usare un solo worker per le conferme o prevedere
+la serializzazione delle assegnazioni. Non è corretto dichiarare il
+sistema interamente safe per invii concorrenti multi-worker.
+
 **Limiti:** la lettura/scrittura su Notion non offre una compare-and-swap
 distribuita su Microsoft/Telegram. Il registro riduce duplicati per gli
 invii avviati dalla dashboard, non e' una garanzia di *exactly once* dei
