@@ -69,21 +69,11 @@
         <div class="d-flex gap-2 align-items-center">
             {% if is_admin %}
             {% if formazione.get('Stato') == 'Programmata' %}
-            <!-- Preview Calendarizzazione per formazioni Programmate -->
-            {% set variant = 'btn-jemore-giallo' %}
-            {% set size = 'btn-sm' %}
-            {% set text = 'Preview' %}
-            {% set icon = none %}
-            {% set onclick = "showPreview('" ~ formazione.get('_notion_id', '') ~ "', 'notification')" %}
-            {% include 'atoms/button.html' %}
+            <a class="btn btn-jemore-giallo btn-sm"
+               href="{{ url_for('main.preview_notification_page', training_id=formazione.get('_notion_id', '')) }}">Preview</a>
             {% elif formazione.get('Stato') == 'Calendarizzata' %}
-            <!-- Preview Feedback per formazioni Calendarizzate -->
-            {% set variant = 'btn-jemore-blu' %}
-            {% set size = 'btn-sm' %}
-            {% set text = 'Preview' %}
-            {% set icon = none %}
-            {% set onclick = "showPreview('" ~ formazione.get('_notion_id', '') ~ "', 'feedback')" %}
-            {% include 'atoms/button.html' %}
+            <a class="btn btn-jemore-blu btn-sm"
+               href="{{ url_for('main.preview_feedback_page', training_id=formazione.get('_notion_id', '')) }}">Preview</a>
             {% else %}
             <!-- Azioni per formazioni Concluse: Sincronizzazione Presenze -->
             {% set variant = 'btn-jemore-verde' %}
@@ -108,31 +98,3 @@
     </td>
 </tr>
 
-<script>
-    if (typeof showPreview !== 'function') {
-        window.showPreview = function (trainingId, actionType) {
-            const titles = {
-                'notification': 'Generazione Preview Notifica',
-                'feedback': 'Generazione Preview Feedback'
-            };
-
-            const messages = {
-                'notification': 'Preparazione messaggi Telegram, email e Teams...',
-                'feedback': 'Preparazione richiesta feedback...'
-            };
-
-            const targetUrl = actionType === 'notification'
-                ? `/preview/notification/${trainingId}`
-                : `/preview/feedback/${trainingId}`;
-
-            // Feedback a livello di riga (opzionale ma carino per l'istante del click)
-            const actionsEl = document.getElementById(`actions-${trainingId}`);
-            if (actionsEl) actionsEl.classList.add('d-none');
-
-            // Navighiamo alla pagina di loading professionale
-            const loadingUrl = `/loading?next=${encodeURIComponent(targetUrl)}&title=${encodeURIComponent(titles[actionType])}&message=${encodeURIComponent(messages[actionType])}`;
-            window.location.href = loadingUrl;
-        };
-    }
-
-</script>
