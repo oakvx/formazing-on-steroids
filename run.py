@@ -20,6 +20,9 @@ app = create_app()
 if __name__ == '__main__':
     port = proteus.get('FLASK.PORT', 5000, cast=int)
     debug = proteus.get('FLASK.DEBUG_MODE', False, cast=bool)
+    host = proteus.get('FLASK.HOST', '127.0.0.1')
+    if debug and host not in ('localhost', '127.0.0.1', '::1'):
+        raise RuntimeError('Il debugger Flask deve rimanere su loopback: disattiva DEBUG_MODE prima di esporre il servizio.')
     
     print("=" * 60)
     print("🚀 FORMAZING - APP GESTIONE FORMAZIONI")
@@ -31,7 +34,7 @@ if __name__ == '__main__':
     
     # Avvia il server Flask
     app.run(
-        host='0.0.0.0',
+        host=host,
         port=port,
         debug=debug,
         threaded=True
