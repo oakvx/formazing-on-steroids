@@ -24,7 +24,7 @@ import time
 import logging
 import yaml
 import os
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 
 # Logger per routes (configurazione centralizzata già attiva)
 logger = logging.getLogger(__name__)
@@ -528,14 +528,29 @@ def api_logs():
     if start_dt > end_dt:
         return jsonify({'error': "'start' non può essere successivo a 'end'"}), 400
 
-    # --- Lettura dei log tramite LogService ---
-    log_service = LogService()
-    log_lines = log_service.get_logs(start_dt=start_dt, end_dt=end_dt)
+    # Bound both the time window and the returned response. Without limits an
+    # admin request could exhaust worker memory by loading many rotated files.
+    if end_dt - start_dt > timedelta(days=31):
+        return jsonify({'error': 'Intervallo massimo: 31 giorni.'}), 400
 
-    return jsonify({
-        'logs':  log_lines,
-        'count': len(log_lines),
+    level = request.args.get('level', 'ALL').upper()
+    query = request.args.get('q', '').strip()
+    limit_raw = request.args.get('limit', '200')
+    if level not in {'ALL', 'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'}:
+        return jsonify({'error': 'Livello di log non valido.'}), 400
+    if len(query) > 100:
+        return jsonify({'error': 'Ricerca troppo lunga (massimo 100 caratteri).'}), 400
+    if not limit_raw.isdecimal() or not 1 <= int(limit_raw) <= 500:
+        return jsonify({'error': 'Il limite deve essere un intero tra 1 e 500.'}), 400
+
+    result = LogService().get_filtered_logs(
+        start_dt=start_dt, end_dt=end_dt,
+        level=level, query=query, limit=int(limit_raw),
+    )
+    result.update({
         'start': start_dt.strftime('%Y-%m-%d %H:%M:%S'),
-        'end':   end_dt.strftime('%Y-%m-%d %H:%M:%S'),
+        'end': end_dt.strftime('%Y-%m-%d %H:%M:%S'),
+        'level': level,
     })
+    return jsonify(result)
 
