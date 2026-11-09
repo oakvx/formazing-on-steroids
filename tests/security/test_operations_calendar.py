@@ -268,3 +268,29 @@ def test_calendar_and_participants_pages_do_not_mutate_notion_on_get():
     assert 'method="POST"' in participants
     assert 'name="csrf_token"' in participants
     assert 'method="get"' in calendar_html
+
+
+def test_configured_journal_path_is_stable_and_never_web_exposed(tmp_path, monkeypatch):
+    config = ModuleType('config')
+    config.BASE_DIR = str(tmp_path)
+    config.proteus = SimpleNamespace(get=lambda name: 'var/operations.sqlite3')
+    monkeypatch.setitem(sys.modules, 'config', config)
+    store = OperationJournal.configured()
+    assert store.db_path == tmp_path / 'var' / 'operations.sqlite3'
+    assert store.db_path.exists()
+    config.proteus.get = lambda name: 'app/static/private/operations.sqlite3'
+    with pytest.raises(ValueError, match='statica'):
+        OperationJournal.configured()
+    assert not (tmp_path / 'app/static/private/operations.sqlite3').exists()
+
+
+def test_journal_does_not_change_permissions_on_existing_parent(tmp_path):
+    import os
+    if os.name == 'nt':
+        pytest.skip('Unix-only permission behavior')
+    parent = tmp_path / 'shared'
+    parent.mkdir(mode=0o755)
+    before = parent.stat().st_mode & 0o777
+    db = OperationJournal(parent / 'operations.sqlite3')
+    assert (parent.stat().st_mode & 0o777) == before
+    assert (db.db_path.stat().st_mode & 0o777) == 0o600
