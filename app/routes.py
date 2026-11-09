@@ -18,7 +18,7 @@ from app.services.analytics_service import AnalyticsService
 from app.services.log_service import LogService
 from app.services.operation_journal import OperationJournal, DuplicateOperation, InvalidTransition
 from app.services.operation_recovery import reconcile_notion, resume_unsent_telegram
-from app.services.schedule_service import build_calendar, all_trainings, filter_trainings, STATES
+from app.services.schedule_service import build_calendar, all_trainings, filter_trainings, potential_conflicts, STATES
 from config import proteus
 from app.security import allowed_domain, safe_local_path
 import secrets
@@ -158,9 +158,14 @@ async def dashboard():
             # Salva i dati grezzi in cache per 10 minuti
             cache.set(cache_key, dashboard_data, timeout=600)
 
-        formazioni_programmata = dashboard_data.get('Programmata', [])
-        formazioni_calendarizzata = dashboard_data.get('Calendarizzata', [])
-        formazioni_conclusa = dashboard_data.get('Conclusa', [])
+        q = request.args.get('q', '').strip()
+        area = request.args.get('area', '').strip()
+        status = request.args.get('status', '').strip()
+        all_rows = all_trainings(dashboard_data)
+        filtered = filter_trainings(all_rows, query=q, area=area, status=status)
+        formazioni_programmata = [row for row in filtered if row.get('Stato') == 'Programmata']
+        formazioni_calendarizzata = [row for row in filtered if row.get('Stato') == 'Calendarizzata']
+        formazioni_conclusa = [row for row in filtered if row.get('Stato') == 'Conclusa']
         
         stats = {
             'programmata': len(formazioni_programmata),
@@ -175,8 +180,23 @@ async def dashboard():
                              formazioni_calendarizzata=formazioni_calendarizzata,
                              formazioni_conclusa=formazioni_conclusa,
                              stats=stats,
+                             total_unfiltered=len(all_rows),
+                             filter_q=q, filter_area=area, filter_status=status,
+                             available_areas=sorted(
+                                 {str(a) for row in all_rows for a in
+                                  (row.get('Area') if isinstance(row.get('Area'), list)
+                                   else [row.get('Area')] if row.get('Area') else [])
+                                  if a}, key=str.casefold),
+                             conflict_ids={
+                                 event[id_key]
+                                 for event in potential_conflicts(all_rows)
+                                 for id_key in ('left_id', 'right_id')
+                             },
                              title='Dashboard - Formazing')
                              
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
     except NotionServiceError as e:
         # Errore specifico NotionService
         logger.error(f"NotionService error nella dashboard: {e}", exc_info=True)
