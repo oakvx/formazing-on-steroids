@@ -18,6 +18,7 @@ from app.services.analytics_service import AnalyticsService
 from app.services.log_service import LogService
 from app.services.operation_journal import OperationJournal, DuplicateOperation, InvalidTransition
 from app.services.operation_recovery import reconcile_notion, resume_unsent_telegram
+from app.services.schedule_service import build_calendar, all_trainings, filter_trainings, STATES
 from config import proteus
 from app.security import allowed_domain, safe_local_path
 import secrets
@@ -187,6 +188,50 @@ async def dashboard():
         logger.error(f"Errore imprevisto nella dashboard: {e}", exc_info=True)
         flash(f"Errore imprevisto: {e}", 'error')
         return redirect(url_for('main.home'))
+
+
+
+# --- CALENDARIO E RICERCA (solo lettura, Notion e' la fonte dati) ---
+
+@main.route('/calendar')
+@login_required
+async def calendar_page():
+    month = request.args.get('month', '')
+    query = request.args.get('q', '').strip()
+    area = request.args.get('area', '').strip()
+    status = request.args.get('status', '').strip()
+    try:
+        snapshot = cache.get('dashboard_data_notion')
+        if snapshot is None:
+            snapshot = await TrainingService.get_instance().notion_service.get_dashboard_data()
+            cache.set('dashboard_data_notion', snapshot, timeout=600)
+        model = build_calendar(
+            snapshot, month, query=query, area=area, status=status,
+        )
+        return render_template('pages/calendar.html', model=model,
+                               title='Calendario formazioni - Formazing')
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+    except Exception:
+        logger.exception('Impossibile caricare il calendario')
+        flash('Calendario non disponibile. Verifica la connessione Notion.', 'error')
+        return redirect(url_for('main.dashboard'))
+
+
+@main.route('/participants/<training_id>')
+@admin_required
+async def participants_page(training_id):
+    """Read-only people/attendance snapshot, explicitly restricted to admins."""
+    try:
+        training = await TrainingService.get_instance().notion_service.get_formazione_by_id(training_id)
+        if not training:
+            return jsonify({'error': 'Formazione non trovata'}), 404
+        return render_template('pages/participants.html',
+                               training=training, title='Partecipanti - Formazing')
+    except Exception:
+        logger.exception('Errore caricamento partecipanti')
+        flash('Dati partecipanti non disponibili.', 'error')
+        return redirect(url_for('main.dashboard'))
 
 
 @main.route('/guida')
