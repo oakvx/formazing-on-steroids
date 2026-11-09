@@ -46,7 +46,7 @@
 
 <script>
     document.addEventListener('DOMContentLoaded', function() {
-        const nextUrl = "{{ next_url|safe }}";
+        const nextUrl = {{ next_url|tojson }};
         
         // Un piccolo delay per far apprezzare l'animazione e non far sembrare lo scatto troppo brusco
         setTimeout(() => {
