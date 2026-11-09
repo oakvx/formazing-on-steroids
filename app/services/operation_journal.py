@@ -7,6 +7,7 @@ A journal record is unique per (Notion training ID, operation type).
 import json
 import os
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -72,12 +73,17 @@ class OperationJournal:
         supplied = proteus.get('APP.OPERATIONS_DB')
         return cls(supplied if supplied else Path(BASE_DIR) / 'var' / 'operations.sqlite3')
 
+    @contextmanager
     def _connect(self):
         connection = sqlite3.connect(str(self.db_path), timeout=10)
-        connection.row_factory = sqlite3.Row
-        connection.execute('PRAGMA busy_timeout=10000')
-        connection.execute('PRAGMA foreign_keys=ON')
-        return connection
+        try:
+            connection.row_factory = sqlite3.Row
+            connection.execute('PRAGMA busy_timeout=10000')
+            connection.execute('PRAGMA foreign_keys=ON')
+            with connection:
+                yield connection
+        finally:
+            connection.close()
 
     @staticmethod
     def _public(row):
