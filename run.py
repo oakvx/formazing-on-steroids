@@ -8,7 +8,7 @@ python run.py
 
 ACCESSO:
 http://localhost:5000
-Username/Password: configurabili in config.py
+Accesso: Microsoft SSO con domini e utenti amministratori autorizzati
 """
 
 from app import create_app
@@ -28,7 +28,7 @@ if __name__ == '__main__':
     print("🚀 FORMAZING - APP GESTIONE FORMAZIONI")
     print("=" * 60)
     print(f"📍 URL: http://localhost:{port}")
-    print(f"🔐 Auth: Basic Auth richiesta")
+    print("🔐 Auth: Microsoft SSO")
     print(f"🏠 Home: Dashboard formazioni")
     print("=" * 60)
     
