@@ -49,7 +49,7 @@ class AuthService:
         return self.msal_app.get_authorization_request_url(
             ["User.Read"], # Scopes standard
             state=state,
-            redirect_uri=proteus.get('MSAL_REDIRECT_URI', 'http://localhost:5001/auth/callback')
+            redirect_uri=proteus.get('MSAL_REDIRECT_URI', 'http://localhost:5000/auth/callback')
         )
 
     def get_token_from_code(self, auth_code):
@@ -57,7 +57,7 @@ class AuthService:
         return self.msal_app.acquire_token_by_authorization_code(
             auth_code,
             scopes=["User.Read"],
-            redirect_uri=proteus.get('MSAL_REDIRECT_URI', 'http://localhost:5001/auth/callback')
+            redirect_uri=proteus.get('MSAL_REDIRECT_URI', 'http://localhost:5000/auth/callback')
         )
 
     def build_logout_url(self, redirect_to):
