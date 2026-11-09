@@ -16,6 +16,8 @@ from app.services.notion import NotionServiceError
 from app.services.training_service import TrainingService, TrainingServiceError
 from app.services.analytics_service import AnalyticsService
 from app.services.log_service import LogService
+from app.services.operation_journal import OperationJournal, DuplicateOperation, InvalidTransition
+from app.services.operation_recovery import reconcile_notion, resume_unsent_telegram
 from config import proteus
 from app.security import allowed_domain, safe_local_path
 import secrets
@@ -359,6 +361,7 @@ async def preview_feedback_page(training_id):
 @admin_required
 async def confirm_notification(training_id):
     """Conferma ed esegue calendarizzazione con supporto a testi personalizzati."""
+    attempt = None
     try:
         logger.info(f"Conferma calendarizzazione | Training ID: {training_id}")
         
@@ -379,11 +382,15 @@ async def confirm_notification(training_id):
         logger.debug(f"Testi personalizzati ricevuti: Email={bool(custom_email_body)}, Telegram={len(custom_messages)} gruppi")
 
         # 2. Esecuzione tramite Service
+        journal = OperationJournal.configured()
+        actor = session['user'].get('preferred_username', '').casefold()
+        attempt = journal.begin(training_id, 'notification', actor)
         training_service = TrainingService.get_instance()
         result = await training_service.send_training_notification(
             training_id, 
             custom_messages=custom_messages,
-            custom_email_body=custom_email_body
+            custom_email_body=custom_email_body,
+            progress=attempt
         )
         
         logger.info(f"Calendarizzazione completata | ID: {training_id} | Codice: {result.get('codice_generato', 'N/A')}")
@@ -394,11 +401,18 @@ async def confirm_notification(training_id):
         flash('Comunicazione inviata con successo! La formazione è stata calendarizzata.', 'success')
         return redirect(url_for('main.dashboard'))
         
+    except DuplicateOperation as e:
+        flash(str(e), 'warning')
+        return redirect(url_for('main.operations'))
     except TrainingServiceError as e:
+        if attempt:
+            attempt.review()
         logger.error(f"Errore conferma calendarizzazione: {e}")
         flash(f'Errore: {e}', 'error')
         return redirect(url_for('main.dashboard'))
     except Exception as e:
+        if attempt:
+            attempt.review()
         logger.error(f"Errore imprevisto conferma calendarizzazione: {e}", exc_info=True)
         flash(f'Errore imprevisto: {e}', 'error')
         return redirect(url_for('main.dashboard'))
@@ -408,6 +422,7 @@ async def confirm_notification(training_id):
 @admin_required
 async def confirm_feedback(training_id):
     """Conferma ed esegue invio feedback con supporto a messaggi personalizzati."""
+    attempt = None
     try:
         logger.info(f"Conferma invio feedback | Training ID: {training_id}")
         
@@ -421,10 +436,14 @@ async def confirm_feedback(training_id):
                     custom_messages[group_key] = request.form.get(key)
 
         # 2. Esecuzione tramite Service
+        journal = OperationJournal.configured()
+        actor = session['user'].get('preferred_username', '').casefold()
+        attempt = journal.begin(training_id, 'feedback', actor)
         training_service = TrainingService.get_instance()
         result = await training_service.send_feedback_request(
             training_id,
-            custom_messages=custom_messages
+            custom_messages=custom_messages,
+            progress=attempt
         )
         
         logger.info(f"Feedback inviato con successo | ID: {training_id}")
@@ -435,11 +454,18 @@ async def confirm_feedback(training_id):
         flash('Richiesta feedback inviata con successo! La formazione è stata conclusa.', 'success')
         return redirect(url_for('main.dashboard'))
         
+    except DuplicateOperation as e:
+        flash(str(e), 'warning')
+        return redirect(url_for('main.operations'))
     except TrainingServiceError as e:
+        if attempt:
+            attempt.review()
         logger.error(f"Errore conferma feedback: {e}")
         flash(f'Errore: {e}', 'error')
         return redirect(url_for('main.dashboard'))
     except Exception as e:
+        if attempt:
+            attempt.review()
         logger.error(f"Errore imprevisto conferma feedback: {e}", exc_info=True)
         flash(f'Errore imprevisto: {e}', 'error')
         return redirect(url_for('main.dashboard'))
