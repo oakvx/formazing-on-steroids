@@ -36,9 +36,9 @@ class OperationJournal:
 
     def __init__(self, db_path):
         self.db_path = Path(db_path).expanduser().resolve()
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        if os.name != 'nt':
-            os.chmod(self.db_path.parent, self.db_path.parent.stat().st_mode & 0o700)
+        # Only new directories are created private. Never chmod an existing
+        # parent such as /home, /data or a shared deployment mount.
+        self.db_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         # SQLite connection per operation: safe with multiple Flask workers.
         with self._connect() as connection:
             connection.executescript("""
@@ -71,7 +71,14 @@ class OperationJournal:
     def configured(cls):
         from config import BASE_DIR, proteus
         supplied = proteus.get('APP.OPERATIONS_DB')
-        return cls(supplied if supplied else Path(BASE_DIR) / 'var' / 'operations.sqlite3')
+        candidate = Path(supplied).expanduser() if supplied else Path('var/operations.sqlite3')
+        if not candidate.is_absolute():
+            candidate = Path(BASE_DIR) / candidate
+        destination = candidate.resolve()
+        public_dir = (Path(BASE_DIR) / 'app' / 'static').resolve()
+        if destination == public_dir or public_dir in destination.parents:
+            raise ValueError('Il database operazioni non può stare nella cartella web statica.')
+        return cls(destination)
 
     @contextmanager
     def _connect(self):
