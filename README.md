@@ -78,7 +78,7 @@ An app as simple as a button that:
 
 ### Phase 2: Send communications (1 click in the app, with mandatory preview)
 
-1. **Open the Flask app** and log in with your password (Basic Auth protection).
+1. **Open the Flask app** and log in with Microsoft Entra SSO (allowed domain + explicit administrator list).
 2. **See ONLY the training sessions** with status = "Planned".
 3. **Select the training** and click "Preview communications".
 4. **See exactly** what will be sent and to whom:
@@ -137,8 +137,29 @@ The app performs **3 things:**
 | "I'm afraid of sending by mistake" | Password + mandatory preview + explicit confirmation | No accidental sending |
 | "I don't want to manage complex codes" | The app generates the code on click | Zero human error |
 | "How do I manage feedback links?" | Separate script generates links offline | Links always ready |
-| "A colleague could ruin everything" | Basic Auth + no automatic actions | Only you can send |
+| "A colleague could ruin everything" | Microsoft SSO + admin authorization + CSRF protection | Only you can send |
 | "I want to know today's sessions" | Telegram bot with commands | Info always at your fingertips |
+
+---
+
+## Security, log search and local setup
+
+The Flask web app now requires a strong `FLASK__SECRET_KEY` and
+Microsoft OAuth `state` verification. Administrative submissions use
+CSRF-protected POST forms, and the app binds to `127.0.0.1` by default.
+An explicitly exposed deployment requires HTTPS, secure session cookies
+and a properly configured Microsoft Entra redirect URI.
+
+**New diagnostic features:** the admin-only log viewer supports severity
+filters, case-insensitive search and a bounded 100/200/500-line response
+with a truncation notice. It redacts common secret-bearing fields but is
+not a substitute for avoiding sensitive information in logs.
+
+Copy [`.env.example`](.env.example) to a private `.env` and read the
+[security and deployment guide](docs/security-hardening.md) before
+starting. A previously configured session must log in again after
+rotating its signing key. The security CI uses synthetic data and makes
+no calls to external Microsoft, Notion or Telegram accounts.
 
 ---
 
@@ -146,7 +167,7 @@ The app performs **3 things:**
 
 The project includes a complete testing system to ensure reliability and safety in production.
 
-**For full testing information**: [docs/testing/README.md](https://www.google.com/search?q=docs/testing/README.md)
+**For full testing information**: [docs/testing/README.md](docs/testing/README.md)
 
 ---
 
@@ -154,7 +175,7 @@ The project includes a complete testing system to ensure reliability and safety 
 
 For detailed information on architecture, API, and configuration:
 
-**Full Documentation**: [docs/README.md](https://www.google.com/search?q=docs/README.md)
+**Full Documentation**: [docs/README.md](docs/README.md)
 
 ---
 

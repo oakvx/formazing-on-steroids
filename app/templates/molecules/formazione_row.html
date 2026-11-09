@@ -69,21 +69,11 @@
         <div class="d-flex gap-2 align-items-center">
             {% if is_admin %}
             {% if formazione.get('Stato') == 'Programmata' %}
-            <!-- Preview Calendarizzazione per formazioni Programmate -->
-            {% set variant = 'btn-jemore-giallo' %}
-            {% set size = 'btn-sm' %}
-            {% set text = 'Preview' %}
-            {% set icon = none %}
-            {% set onclick = "showPreview('" ~ formazione.get('_notion_id', '') ~ "', 'notification')" %}
-            {% include 'atoms/button.html' %}
+            <a class="btn btn-jemore-giallo btn-sm"
+               href="{{ url_for('main.preview_notification_page', training_id=formazione.get('_notion_id', '')) }}">Preview</a>
             {% elif formazione.get('Stato') == 'Calendarizzata' %}
-            <!-- Preview Feedback per formazioni Calendarizzate -->
-            {% set variant = 'btn-jemore-blu' %}
-            {% set size = 'btn-sm' %}
-            {% set text = 'Preview' %}
-            {% set icon = none %}
-            {% set onclick = "showPreview('" ~ formazione.get('_notion_id', '') ~ "', 'feedback')" %}
-            {% include 'atoms/button.html' %}
+            <a class="btn btn-jemore-blu btn-sm"
+               href="{{ url_for('main.preview_feedback_page', training_id=formazione.get('_notion_id', '')) }}">Preview</a>
             {% else %}
             <!-- Azioni per formazioni Concluse: Sincronizzazione Presenze -->
             {% set variant = 'btn-jemore-verde' %}
@@ -92,10 +82,11 @@
             {% else %}
             {% set text = 'Aggiorna' %}
             {% endif %}
-            {% set icon = none %}
-            {% set size = 'btn-sm' %}
-            {% set onclick = "triggerSync('" ~ formazione.get('_notion_id', '') ~ "')" %}
-            {% include 'atoms/button.html' %}
+            <form method="POST" action="{{ url_for('main.sync_attendance', training_id=formazione.get('_notion_id', '')) }}"
+                  onsubmit="return confirm('Sincronizzare le presenze da Microsoft Teams?');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-jemore-verde btn-sm">{{ text }}</button>
+            </form>
             {% endif %}
             {% else %}
             <!-- Messaggio Sola Lettura per non-admin -->
@@ -107,45 +98,3 @@
     </td>
 </tr>
 
-<script>
-    if (typeof showPreview !== 'function') {
-        window.showPreview = function (trainingId, actionType) {
-            const titles = {
-                'notification': 'Generazione Preview Notifica',
-                'feedback': 'Generazione Preview Feedback'
-            };
-
-            const messages = {
-                'notification': 'Preparazione messaggi Telegram, email e Teams...',
-                'feedback': 'Preparazione richiesta feedback...'
-            };
-
-            const targetUrl = actionType === 'notification'
-                ? `/preview/notification/${trainingId}`
-                : `/preview/feedback/${trainingId}`;
-
-            // Feedback a livello di riga (opzionale ma carino per l'istante del click)
-            const actionsEl = document.getElementById(`actions-${trainingId}`);
-            if (actionsEl) actionsEl.classList.add('d-none');
-
-            // Navighiamo alla pagina di loading professionale
-            const loadingUrl = `/loading?next=${encodeURIComponent(targetUrl)}&title=${encodeURIComponent(titles[actionType])}&message=${encodeURIComponent(messages[actionType])}`;
-            window.location.href = loadingUrl;
-        };
-    }
-
-    if (typeof triggerSync !== 'function') {
-        window.triggerSync = function (trainingId) {
-            // Nasconde le azioni per feedback immediato
-            const actionsEl = document.getElementById(`actions-${trainingId}`);
-            if (actionsEl) actionsEl.classList.add('d-none');
-            
-            const targetUrl = `/sync-attendance/${trainingId}`;
-            const title = 'Sincronizzazione Presenze';
-            const message = 'Connessione a Microsoft Graph e recupero report presenze da Teams...';
-            
-            const loadingUrl = `/loading?next=${encodeURIComponent(targetUrl)}&title=${encodeURIComponent(title)}&message=${encodeURIComponent(message)}`;
-            window.location.href = loadingUrl;
-        };
-    }
-</script>

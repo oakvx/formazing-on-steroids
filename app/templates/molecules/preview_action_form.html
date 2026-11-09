@@ -34,6 +34,7 @@
           id="confirm-action-form"
           action="{{ url_for('main.confirm_notification' if action_type == 'notification' else 'main.confirm_feedback', training_id=training_id) }}"
           onsubmit="return handleConfirm(event, '{{ action_type }}', {{ messages_count }});">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <!-- Contenitore per i campi dinamici inniettati via JS -->
         <div id="hidden-inputs-container"></div>
         

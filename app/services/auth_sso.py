@@ -9,6 +9,7 @@ import asyncio
 from flask import session, redirect, url_for
 from functools import wraps
 from config import proteus
+from app.security import allowed_domain
 
 logger = logging.getLogger(__name__)
 
@@ -43,11 +44,12 @@ class AuthService:
         )
         logger.debug("MSAL ConfidentialClientApplication inizializzata via Proteus")
 
-    def build_auth_url(self):
-        """Genera l'URL per il login Microsoft."""
+    def build_auth_url(self, state):
+        """Genera l'URL per il login Microsoft con state anti-login-CSRF."""
         return self.msal_app.get_authorization_request_url(
             ["User.Read"], # Scopes standard
-            redirect_uri=proteus.get('MSAL_REDIRECT_URI', 'http://localhost:5001/auth/callback')
+            state=state,
+            redirect_uri=proteus.get('MSAL_REDIRECT_URI', 'http://localhost:5000/auth/callback')
         )
 
     def get_token_from_code(self, auth_code):
@@ -55,7 +57,7 @@ class AuthService:
         return self.msal_app.acquire_token_by_authorization_code(
             auth_code,
             scopes=["User.Read"],
-            redirect_uri=proteus.get('MSAL_REDIRECT_URI', 'http://localhost:5001/auth/callback')
+            redirect_uri=proteus.get('MSAL_REDIRECT_URI', 'http://localhost:5000/auth/callback')
         )
 
     def build_logout_url(self, redirect_to):
@@ -85,12 +87,10 @@ def login_required(f):
             return redirect(url_for('main.home'))
         
         # Controllo dominio (Whitelist)
-        email = user.get('preferred_username', '').lower()
-        domain = email.split('@')[-1] if '@' in email else ''
-        
-        allowed_domains = proteus.get('AUTH.ALLOWED_DOMAINS', 'jemore.it').split(',')     
-        if domain not in allowed_domains:
-            logger.warning(f"Accesso negato: dominio '{domain}' non autorizzato per {email}")
+        email = user.get('preferred_username', '') if isinstance(user, dict) else ''
+        domains = proteus.get('AUTH.ALLOWED_DOMAINS', 'jemore.it')
+        if not allowed_domain(email, domains):
+            logger.warning("Accesso negato: account senza dominio autorizzato")
             session.clear()
             return "Dominio non autorizzato. Usa l'account JEMORE.", 403
             
@@ -110,10 +110,15 @@ def admin_required(f):
         if not user:
             return redirect(url_for('main.home'))
             
-        # Controllo se è admin
-        if not session.get('is_admin'):
-            email = user.get('preferred_username', '')
-            logger.warning(f"Accesso negato a risorsa admin per: {email}")
+        # An admin flag alone must not bypass the account-domain boundary.
+        email = user.get('preferred_username', '') if isinstance(user, dict) else ''
+        if not allowed_domain(email, proteus.get('AUTH.ALLOWED_DOMAINS', 'jemore.it')):
+            session.clear()
+            logger.warning("Accesso admin negato: dominio non autorizzato")
+            return "Dominio non autorizzato.", 403
+
+        if session.get('is_admin') is not True:
+            logger.warning("Accesso negato a risorsa admin")
             return "Accesso Negato: Non hai i permessi per eseguire questa operazione.", 403
             
         # Gestione asincrona

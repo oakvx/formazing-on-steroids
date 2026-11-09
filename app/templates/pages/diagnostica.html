@@ -424,6 +424,25 @@
                 </div>
             </div>
 
+            <!-- Filtri server-side e limite della risposta -->
+            <div class="d-flex flex-wrap align-items-end gap-2 mb-3">
+                <div><label for="log-level" class="form-label extra-small text-muted mb-1">Severità</label>
+                    <select id="log-level" class="form-select form-select-sm">
+                        <option value="ALL">Tutti</option><option value="DEBUG">DEBUG</option>
+                        <option value="INFO">INFO</option><option value="WARNING">WARNING</option>
+                        <option value="ERROR">ERROR</option><option value="CRITICAL">CRITICAL</option>
+                    </select></div>
+                <div class="flex-grow-1" style="min-width:180px">
+                    <label for="log-search" class="form-label extra-small text-muted mb-1">Cerca nei log</label>
+                    <input id="log-search" type="search" maxlength="100" autocomplete="off"
+                           class="form-control form-control-sm" placeholder="Modulo, evento o testo..."></div>
+                <div><label for="log-limit" class="form-label extra-small text-muted mb-1">Righe recenti</label>
+                    <select id="log-limit" class="form-select form-select-sm">
+                        <option value="100">100</option><option value="200" selected>200</option>
+                        <option value="500">500</option></select></div>
+                <button type="button" id="btn-apply-log-filters" class="btn btn-sm btn-outline-primary">Cerca</button>
+            </div>
+
             <!-- Box terminale -->
             <div id="log-terminal"
                  style="background: #0f1117; border-radius: 8px; padding: 16px;
@@ -463,6 +482,9 @@
         const inputStart   = document.getElementById('log-start');
         const inputEnd     = document.getElementById('log-end');
         const terminal     = document.getElementById('log-terminal');
+        const inputLevel = document.getElementById('log-level');
+        const inputSearch = document.getElementById('log-search');
+        const inputLimit = document.getElementById('log-limit');
 
         // Buffer corrente per il download
         let currentLogLines = [];
@@ -571,6 +593,9 @@
             const params = new URLSearchParams();
             if (inputStart.value) params.set('start', inputStart.value);
             if (inputEnd.value)   params.set('end',   inputEnd.value);
+            params.set('level', inputLevel.value);
+            params.set('q', inputSearch.value.trim());
+            params.set('limit', inputLimit.value);
 
             try {
                 const resp = await fetch(`/api/logs?${params.toString()}`);
@@ -600,7 +625,12 @@
                     terminal.scrollTop = terminal.scrollHeight;
                 }
 
-                logStatusMsg.classList.add('d-none');
+                if (data.truncated) {
+                    logStatusMsg.textContent = `Risultati parziali: mostrate le ultime ${data.count} righe. Restringi intervallo o filtri.`;
+                    logStatusMsg.classList.remove('d-none');
+                } else {
+                    logStatusMsg.classList.add('d-none');
+                }
 
             } catch (err) {
                 showError(`Errore di rete: ${err.message}`);
@@ -641,6 +671,12 @@
         });
 
         document.getElementById('btn-refresh-logs').addEventListener('click', fetchLogs);
+        document.getElementById('btn-apply-log-filters').addEventListener('click', fetchLogs);
+        inputLevel.addEventListener('change', fetchLogs);
+        inputLimit.addEventListener('change', fetchLogs);
+        inputSearch.addEventListener('keydown', event => {
+            if (event.key === 'Enter') { event.preventDefault(); fetchLogs(); }
+        });
         document.getElementById('btn-apply-range').addEventListener('click', () => {
             // Deseleziona tutti i preset quando si usa l'intervallo personalizzato
             document.querySelectorAll('.log-preset-btn').forEach(btn => {

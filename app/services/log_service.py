@@ -10,6 +10,7 @@ Responsabilità:
 import os
 import re
 import logging
+from collections import deque
 from datetime import datetime, date
 from typing import List, Optional
 
@@ -142,7 +143,11 @@ class LogService:
                 filename.startswith(self._log_basename + '.') and
                 filename[len(self._log_basename) + 1:].isdigit()
             ):
-                files.append(os.path.join(self._log_dir, filename))
+                candidate = os.path.join(self._log_dir, filename)
+                # Ignore symlinked log files: only the configured log family
+                # inside the log directory is authorized for the viewer.
+                if os.path.isfile(candidate) and not os.path.islink(candidate):
+                    files.append(candidate)
 
         # Ordina: i file numerati più grandi (es. .5) sono i più vecchi;
         # il file senza suffisso numerico è il più recente.
@@ -244,3 +249,81 @@ class LogService:
             logger.error(f"LogService: errore lettura file '{filepath}': {e}")
 
         return results
+
+    def get_filtered_logs(self, start_dt: datetime, end_dt: datetime, *,
+                          level: str = 'ALL', query: str = '', limit: int = 200) -> dict:
+        """Search rotated log files with bounded response memory.
+
+        Return the newest *limit* lines across matching events. Each event
+        includes its traceback context up to a safe, explicit size. The
+        existing get_logs() method stays available for trusted local scripts.
+        """
+        if limit < 1 or limit > 500:
+            raise ValueError('limit must be between 1 and 500')
+        if level not in {'ALL', 'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'}:
+            raise ValueError('invalid log severity')
+        if len(query) > 100:
+            raise ValueError('search query too long')
+
+        lines = deque(maxlen=limit)
+        matched_lines = 0
+        needle = query.casefold()
+        level_pattern = re.compile(r'\|\s*(DEBUG|INFO|WARNING|ERROR|CRITICAL)\s*\|')
+        # Avoid leaking common secret-bearing key/value fields into the
+        # viewer and downloaded text. Logging should also avoid secrets.
+        secret_pattern = re.compile(
+            r'(?i)\b(authorization|bearer|client_secret|password|'
+            r'access_token|refresh_token|token|api[_-]?key)\b(\s*[:=]\s*|\s+)([^\s,;&]+)'
+        )
+
+        def add_event(event, in_range, event_level):
+            nonlocal matched_lines
+            if not in_range or (level != 'ALL' and event_level != level):
+                return
+            if needle and needle not in '\n'.join(event).casefold():
+                return
+            for line in event:
+                scrubbed = secret_pattern.sub(lambda m: m.group(1) + m.group(2) + '[REDACTED]', line)
+                lines.append(scrubbed)
+                matched_lines += 1
+
+        for filename in self._discover_log_files():
+            event = []
+            in_range = False
+            event_level = ''
+            try:
+                with open(filename, 'r', encoding='utf-8', errors='replace') as source:
+                    for raw in source:
+                        line = raw.rstrip('\r\n')[:2000]
+                        timestamp = _LOG_LINE_RE.match(line)
+                        if timestamp:
+                            add_event(event, in_range, event_level)
+                            event = []
+                            try:
+                                moment = datetime.strptime(timestamp.group(1), '%Y-%m-%d %H:%M:%S')
+                            except ValueError:
+                                in_range = False
+                                continue
+                            # RotatingFileHandler writes chronologically in a
+                            # single file. Do not retain out-of-range events.
+                            if moment > end_dt:
+                                in_range = False
+                                break
+                            in_range = start_dt <= moment <= end_dt
+                            severity = level_pattern.search(line)
+                            event_level = severity.group(1) if severity else ''
+                        if in_range and len(event) < 50:
+                            event.append(line)
+                        elif in_range and len(event) == 50:
+                            event.append('[traceback truncated: too many lines]')
+                    add_event(event, in_range, event_level)
+            except OSError:
+                logger.warning("LogService: failed to read one configured log file")
+                continue
+
+        return {
+            'logs': list(lines),
+            'count': len(lines),
+            'truncated': matched_lines > limit,
+            'limit': limit,
+        }

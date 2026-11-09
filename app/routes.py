@@ -17,10 +17,14 @@ from app.services.training_service import TrainingService, TrainingServiceError
 from app.services.analytics_service import AnalyticsService
 from app.services.log_service import LogService
 from config import proteus
+from app.security import allowed_domain, safe_local_path
+import secrets
+import hmac
+import time
 import logging
 import yaml
 import os
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 
 # Logger per routes (configurazione centralizzata già attiva)
 logger = logging.getLogger(__name__)
@@ -34,13 +38,27 @@ main = Blueprint('main', __name__)
 def login():
     """Avvia il flusso di login Microsoft."""
     auth_service = AuthService.get_instance()
-    auth_url = auth_service.build_auth_url()
+    # MSAL must echo the nonce on callback. A response not initiated by
+    # this browser cannot create an authenticated Flask session.
+    state = secrets.token_urlsafe(32)
+    session['oauth_state'] = state
+    session['oauth_started'] = int(time.time())
+    auth_url = auth_service.build_auth_url(state)
     return redirect(auth_url)
 
 
 @main.route('/auth/callback')
 def auth_callback():
     """Riceve il codice da Microsoft e completa l'autenticazione."""
+    received = request.args.get('state', '')
+    expected = session.pop('oauth_state', None)
+    started = session.pop('oauth_started', 0)
+    if (not isinstance(expected, str) or not isinstance(received, str) or
+            not hmac.compare_digest(received, expected) or
+            not isinstance(started, int) or
+            not 0 <= time.time() - started <= 600):
+        logger.warning("Microsoft callback rejected: missing, expired or mismatched OAuth state")
+        return "Richiesta di autenticazione non valida o scaduta.", 400
     code = request.args.get('code')
     if not code:
         flash("Errore durante il login: codice mancante.", "error")
@@ -63,20 +81,19 @@ def auth_callback():
     email = id_token_claims.get('preferred_username', '').lower()
     
     # 1. Validazione Dominio
-    domain = email.split('@')[-1] if '@' in email else ''
-    allowed_domains = proteus.get('AUTH.ALLOWED_DOMAINS', 'jemore.it').split(',')
-    if domain not in allowed_domains:
-        logger.warning(f"Accesso negato: dominio '{domain}' non autorizzato per {email}")
+    if not allowed_domain(email, proteus.get('AUTH.ALLOWED_DOMAINS', 'jemore.it')):
+        logger.warning("Microsoft callback rejected: unauthorized account domain")
         return render_template('pages/error.html', 
                              message="Dominio non autorizzato. Usa l'account JEMORE.",
                              title="Accesso Negato")
     
-    # 2. Setup Sessione
+    # 2. Setup Sessione: drop any pre-authentication state before issuing the new cookie.
+    session.clear()
     session['user'] = id_token_claims
     
     # 3. RBAC: Controllo se Admin
     admin_users = proteus.get('AUTH.ADMIN_USERS', '').split(',')
-    is_admin = email in [a.lower().strip() for a in admin_users]
+    is_admin = email in [a.casefold().strip() for a in admin_users]
     session['is_admin'] = is_admin
     
     logger.info(f"Utente loggato: {email} | Admin: {is_admin}")
@@ -248,7 +265,7 @@ async def analytics():
 @main.route('/loading')
 def loading():
     """Pagina di transizione per il caricamento."""
-    next_url = request.args.get('next')
+    next_url = safe_local_path(request.args.get('next'))
     
     # Se un utente accede direttamente senza parametri, mostriamo messaggi simpatici
     if not next_url:
@@ -262,8 +279,8 @@ def loading():
         title, message = random.choice(easter_eggs)
         next_url = url_for('main.dashboard')
     else:
-        title = request.args.get('title', 'Elaborazione in corso...')
-        message = request.args.get('message', 'Attendere prego')
+        title = request.args.get('title', 'Elaborazione in corso...')[:120]
+        message = request.args.get('message', 'Attendere prego')[:240]
     
     return render_template('pages/loading.html', 
                          next_url=next_url,
@@ -428,7 +445,7 @@ async def confirm_feedback(training_id):
         return redirect(url_for('main.dashboard'))
 
 
-@main.route('/sync-attendance/<training_id>', methods=['GET', 'POST'])
+@main.route('/sync-attendance/<training_id>', methods=['POST'])
 @admin_required
 async def sync_attendance(training_id):
     """Sincronizza manualmente i partecipanti da Teams per una formazione conclusa."""
@@ -511,14 +528,29 @@ def api_logs():
     if start_dt > end_dt:
         return jsonify({'error': "'start' non può essere successivo a 'end'"}), 400
 
-    # --- Lettura dei log tramite LogService ---
-    log_service = LogService()
-    log_lines = log_service.get_logs(start_dt=start_dt, end_dt=end_dt)
+    # Bound both the time window and the returned response. Without limits an
+    # admin request could exhaust worker memory by loading many rotated files.
+    if end_dt - start_dt > timedelta(days=31):
+        return jsonify({'error': 'Intervallo massimo: 31 giorni.'}), 400
 
-    return jsonify({
-        'logs':  log_lines,
-        'count': len(log_lines),
+    level = request.args.get('level', 'ALL').upper()
+    query = request.args.get('q', '').strip()
+    limit_raw = request.args.get('limit', '200')
+    if level not in {'ALL', 'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'}:
+        return jsonify({'error': 'Livello di log non valido.'}), 400
+    if len(query) > 100:
+        return jsonify({'error': 'Ricerca troppo lunga (massimo 100 caratteri).'}), 400
+    if not limit_raw.isdecimal() or not 1 <= int(limit_raw) <= 500:
+        return jsonify({'error': 'Il limite deve essere un intero tra 1 e 500.'}), 400
+
+    result = LogService().get_filtered_logs(
+        start_dt=start_dt, end_dt=end_dt,
+        level=level, query=query, limit=int(limit_raw),
+    )
+    result.update({
         'start': start_dt.strftime('%Y-%m-%d %H:%M:%S'),
-        'end':   end_dt.strftime('%Y-%m-%d %H:%M:%S'),
+        'end': end_dt.strftime('%Y-%m-%d %H:%M:%S'),
+        'level': level,
     })
+    return jsonify(result)
 
