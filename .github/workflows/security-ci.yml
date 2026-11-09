@@ -24,4 +24,4 @@ jobs:
       - name: Syntax check for all Python source
         run: python -m compileall -q app config.py run.py tests/security
       - name: Offline security and log viewer tests
-        run: python -m pytest -q -o addopts= tests/security/test_security_controls.py
+        run: python -m pytest -q -o addopts= --confcutdir=tests/security tests/security/test_security_controls.py
