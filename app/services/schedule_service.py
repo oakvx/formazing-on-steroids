@@ -60,6 +60,8 @@ def filter_trainings(records, *, query='', area='', status=''):
             training.get('Codice') or '',
             training.get('Periodo') or '',
             training.get('Stato') or '',
+            training.get('Data/Ora') or '',
+            training.get('_notion_id') or '',
             training.get('Partecipanti') or '',
             ' '.join(_areas(training)),
         )
@@ -161,7 +163,10 @@ def build_calendar(snapshot, month=None, *, query='', area='', status=''):
         'weeks': grid,
         'records': sorted(visible, key=lambda item:
                           parse_training_date(item.get('Data/Ora')) or datetime.max),
-        'conflicts': potential_conflicts(all_rows),
+        'conflicts': [item for item in potential_conflicts(visible)
+                      if parse_training_date(item['when']) and
+                      parse_training_date(item['when']).year == year and
+                      parse_training_date(item['when']).month == number],
         'areas': sorted({a for row in all_rows for a in _areas(row)}, key=str.casefold),
         'query': query,
         'area': area,
