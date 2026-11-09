@@ -19,6 +19,38 @@
         </div>
     </div>
 
+    <div class="card-jemore border-0 shadow-sm p-3 mb-3">
+        <form action="{{ url_for('main.dashboard') }}" method="GET" class="row g-2 align-items-end">
+            <div class="col-md-5">
+                <label for="dashboard-q" class="form-label small">Cerca formazione, codice, periodo, data o partecipante</label>
+                <input id="dashboard-q" type="search" name="q" maxlength="100" class="form-control"
+                       value="{{ filter_q }}" placeholder="Cerca...">
+            </div>
+            <div class="col-md-3">
+                <label for="dashboard-area" class="form-label small">Area</label>
+                <select id="dashboard-area" name="area" class="form-select">
+                    <option value="">Tutte</option>
+                    {% for area in available_areas %}
+                    <option value="{{ area }}" {% if filter_area == area %}selected{% endif %}>{{ area }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label for="dashboard-status" class="form-label small">Stato</label>
+                <select id="dashboard-status" name="status" class="form-select">
+                    <option value="">Tutti</option>
+                    {% for status in ('Programmata', 'Calendarizzata', 'Conclusa') %}
+                    <option value="{{ status }}" {% if filter_status == status %}selected{% endif %}>{{ status }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2"><button type="submit" class="btn btn-jemore-dark-blu w-100">Filtra</button></div>
+        </form>
+        <p class="small text-muted mb-0 mt-2">Visibili {{ stats.totale }} di {{ total_unfiltered }} formazioni.
+            <a href="{{ url_for('main.dashboard') }}">Azzera filtri</a>
+            · <a href="{{ url_for('main.calendar_page') }}">Calendario mensile</a></p>
+    </div>
+
     <!-- Statistics Section -->
     {% include 'organisms/dashboard_stats.html' %}
 

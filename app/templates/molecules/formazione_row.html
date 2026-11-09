@@ -3,6 +3,14 @@
     <!-- Nome -->
     <td class="text-truncate" style="max-width: 0;" title="{{ formazione.get('Nome', 'N/A') }}">
         <div class="fw-bold text-blu-jemore text-truncate">{{ formazione.get('Nome', 'N/A') }}</div>
+        {% if formazione.get('_notion_id') in conflict_ids %}
+        <span class="badge bg-warning text-dark small" title="Coincidenza di orario rilevata: verificare il calendario">
+            <i class="bi bi-exclamation-triangle me-1"></i>Possibile conflitto
+        </span>
+        {% endif %}
+        {% if is_admin %}
+        <a class="small d-block" href="{{ url_for('main.participants_page', training_id=formazione.get('_notion_id', '')) }}">Partecipanti</a>
+        {% endif %}
         {% if formazione.get('Codice') %}
         <small class="text-muted d-block text-truncate">{{ formazione['Codice'] }}</small>
         {% endif %}

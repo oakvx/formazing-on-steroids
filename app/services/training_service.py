@@ -217,7 +217,7 @@ class TrainingService:
             logger.error(f"Errore imprevisto in preview {training_id}: {e}")
             raise TrainingServiceError(f"Errore interno: {e}")
     
-    async def send_training_notification(self, training_id: str, custom_messages: Dict[str, str] = None, custom_email_body: str = None) -> Dict:
+    async def send_training_notification(self, training_id: str, custom_messages: Dict[str, str] = None, custom_email_body: str = None, progress=None) -> Dict:
         """
         Workflow completo per invio comunicazione formazione.
         
@@ -256,17 +256,28 @@ class TrainingService:
             if training.get('Stato') != 'Programmata':
                 raise TrainingServiceError("Formazione già processata o stato non valido")
             
+            if progress:
+                progress.step('validated')
+
             # 2. Genera codice
             generated_code = self._generate_training_code(training)
             
             # Aggiungi codice alla formazione per passarlo a Microsoft
             training['Codice'] = generated_code
             
+            # External effect: record BEFORE sending. After interruption its
+            # outcome is unknown, so a blind retry is prohibited.
+            if progress:
+                progress.step('microsoft_attempted')
             # 3. Crea evento Teams + invia email (FAIL-FAST se fallisce)
             try:
                 microsoft_result = await self._create_teams_meeting(training, custom_email_body)
                 teams_link = microsoft_result['teams_link']
                 attendee_emails = microsoft_result['attendee_emails']
+                if progress:
+                    progress.step('notion_pending', metadata={
+                        'code': generated_code, 'teams_link': teams_link
+                    })
             except MicrosoftServiceError as e:
                 # FAIL-FAST: Se Microsoft fallisce, non proseguiamo
                 logger.error(f"FAIL-FAST: Integrazione Microsoft fallita per {training_id}: {e}")
@@ -279,6 +290,9 @@ class TrainingService:
                 'Stato': 'Calendarizzata'
             })
             
+            if progress:
+                progress.step('telegram_not_started')
+
             # 5. Recupera formazione aggiornata per invio Telegram
             updated_training = await self.notion_service.get_formazione_by_id(training_id)
             
@@ -290,8 +304,15 @@ class TrainingService:
                     if custom_messages[key]:
                         custom_messages[key] = custom_messages[key].replace(dummy_link, real_link)
             
-            # Invia messaggi Telegram (usa custom_messages se forniti)
+            # Delivery cannot be retried blindly: a network timeout does not
+            # prove that Telegram did not accept the message.
+            if progress:
+                progress.step('telegram_attempted')
             send_results = await self.telegram_service.send_training_notification(updated_training, custom_messages)
+            if not all(send_results.values()):
+                raise TrainingServiceError(
+                    'Invio Telegram parziale o incerto: verifica i gruppi prima di riprovare.'
+                )
             
             result = {
                 'codice_generato': generated_code,
@@ -305,6 +326,8 @@ class TrainingService:
                 f"Workflow calendarizzazione completato: {updated_training.get('Nome', 'N/A')} | "
                 f"Codice: {generated_code} | Email: {len(attendee_emails)} | Telegram: {len(send_results)} gruppi"
             )
+            if progress:
+                progress.complete()
             return result
             
         except NotionServiceError as e:
@@ -397,7 +420,7 @@ class TrainingService:
             logger.error(f"Errore in generate_feedback_preview: {e}")
             raise TrainingServiceError(f"Errore generazione preview feedback: {e}")
     
-    async def send_feedback_request(self, training_id: str, custom_messages: Dict[str, str] = None) -> Dict:
+    async def send_feedback_request(self, training_id: str, custom_messages: Dict[str, str] = None, progress=None) -> Dict:
         """
         Invia richiesta feedback post-formazione con supporto a messaggi personalizzati.
         
@@ -418,10 +441,21 @@ class TrainingService:
             if training.get('Stato') != 'Calendarizzata':
                 raise TrainingServiceError(f"Formazione non ancora calendarizzata. Stato attuale: {training.get('Stato')}")
 
+            if progress:
+                progress.step('validated')
             feedback_link = self._generate_feedback_link()
 
-            # Passiamo i messaggi personalizzati (se presenti)
+            # Mark before the first external message. A partial batch needs
+            # manual review rather than a second send to all recipients.
+            if progress:
+                progress.step('telegram_attempted')
             send_results = await self.telegram_service.send_feedback_notification(training, feedback_link, custom_messages)
+            if not all(send_results.values()):
+                raise TrainingServiceError(
+                    'Feedback Telegram parziale o incerto: controlla i gruppi; nessun reinvio automatico.'
+                )
+            if progress:
+                progress.step('feedback_notion_pending')
 
             await self.notion_service.update_formazione(training_id, {
                 'Stato': 'Conclusa'
@@ -434,6 +468,8 @@ class TrainingService:
             }
             
             logger.info(f"Workflow feedback completato: {training.get('Nome', 'N/A')} | Gruppi notificati: {len(send_results)}")
+            if progress:
+                progress.complete()
             return result
             
         except NotionServiceError as e:

@@ -163,6 +163,28 @@ no calls to external Microsoft, Notion or Telegram accounts.
 
 ---
 
+## Centro operazioni e calendario
+
+La dashboard comprende ora **ricerca e filtri**, un **calendario mensile**
+di sola lettura costruito sui dati Notion, avvisi di **possibili
+coincidenze d'orario** e una vista amministrativa dei **partecipanti**.
+
+Il **Centro operazioni** (solo amministratori) conserva un journal SQLite
+con checkpoint e audit degli invii Teams/email/Telegram. Impedisce doppie
+conferme per la stessa formazione e consente il recupero **solo** delle
+fasi di cui è noto l'esito: riconciliazione Notion e, quando non ancora
+tentato, invio Telegram con template standard. **Non riprova alla cieca**
+operazioni esterne con esito sconosciuto.
+
+Per installare: definire `APP__OPERATIONS_DB` in `.env` (directory
+persistente e non pubblica) e **non cancellare il database** per forzare
+una seconda esecuzione. Il nuovo journal non è una transazione distribuita
+"exactly once" tra i provider. Leggere la
+[guida operativa](docs/operations-calendar.md) e la
+[guida sicurezza](docs/security-hardening.md) prima dell'uso con dati reali.
+
+---
+
 ## Testing and Validation
 
 The project includes a complete testing system to ensure reliability and safety in production.

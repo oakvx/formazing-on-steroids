@@ -16,6 +16,9 @@ from app.services.notion import NotionServiceError
 from app.services.training_service import TrainingService, TrainingServiceError
 from app.services.analytics_service import AnalyticsService
 from app.services.log_service import LogService
+from app.services.operation_journal import OperationJournal, DuplicateOperation, InvalidTransition
+from app.services.operation_recovery import reconcile_notion, resume_unsent_telegram
+from app.services.schedule_service import build_calendar, all_trainings, filter_trainings, potential_conflicts, STATES
 from config import proteus
 from app.security import allowed_domain, safe_local_path
 import secrets
@@ -155,9 +158,14 @@ async def dashboard():
             # Salva i dati grezzi in cache per 10 minuti
             cache.set(cache_key, dashboard_data, timeout=600)
 
-        formazioni_programmata = dashboard_data.get('Programmata', [])
-        formazioni_calendarizzata = dashboard_data.get('Calendarizzata', [])
-        formazioni_conclusa = dashboard_data.get('Conclusa', [])
+        q = request.args.get('q', '').strip()
+        area = request.args.get('area', '').strip()
+        status = request.args.get('status', '').strip()
+        all_rows = all_trainings(dashboard_data)
+        filtered = filter_trainings(all_rows, query=q, area=area, status=status)
+        formazioni_programmata = [row for row in filtered if row.get('Stato') == 'Programmata']
+        formazioni_calendarizzata = [row for row in filtered if row.get('Stato') == 'Calendarizzata']
+        formazioni_conclusa = [row for row in filtered if row.get('Stato') == 'Conclusa']
         
         stats = {
             'programmata': len(formazioni_programmata),
@@ -172,8 +180,23 @@ async def dashboard():
                              formazioni_calendarizzata=formazioni_calendarizzata,
                              formazioni_conclusa=formazioni_conclusa,
                              stats=stats,
+                             total_unfiltered=len(all_rows),
+                             filter_q=q, filter_area=area, filter_status=status,
+                             available_areas=sorted(
+                                 {str(a) for row in all_rows for a in
+                                  (row.get('Area') if isinstance(row.get('Area'), list)
+                                   else [row.get('Area')] if row.get('Area') else [])
+                                  if a}, key=str.casefold),
+                             conflict_ids={
+                                 event[id_key]
+                                 for event in potential_conflicts(all_rows)
+                                 for id_key in ('left_id', 'right_id')
+                             },
                              title='Dashboard - Formazing')
                              
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
     except NotionServiceError as e:
         # Errore specifico NotionService
         logger.error(f"NotionService error nella dashboard: {e}", exc_info=True)
@@ -185,6 +208,50 @@ async def dashboard():
         logger.error(f"Errore imprevisto nella dashboard: {e}", exc_info=True)
         flash(f"Errore imprevisto: {e}", 'error')
         return redirect(url_for('main.home'))
+
+
+
+# --- CALENDARIO E RICERCA (solo lettura, Notion e' la fonte dati) ---
+
+@main.route('/calendar')
+@login_required
+async def calendar_page():
+    month = request.args.get('month', '')
+    query = request.args.get('q', '').strip()
+    area = request.args.get('area', '').strip()
+    status = request.args.get('status', '').strip()
+    try:
+        snapshot = cache.get('dashboard_data_notion')
+        if snapshot is None:
+            snapshot = await TrainingService.get_instance().notion_service.get_dashboard_data()
+            cache.set('dashboard_data_notion', snapshot, timeout=600)
+        model = build_calendar(
+            snapshot, month, query=query, area=area, status=status,
+        )
+        return render_template('pages/calendar.html', model=model,
+                               title='Calendario formazioni - Formazing')
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+    except Exception:
+        logger.exception('Impossibile caricare il calendario')
+        flash('Calendario non disponibile. Verifica la connessione Notion.', 'error')
+        return redirect(url_for('main.dashboard'))
+
+
+@main.route('/participants/<training_id>')
+@admin_required
+async def participants_page(training_id):
+    """Read-only people/attendance snapshot, explicitly restricted to admins."""
+    try:
+        training = await TrainingService.get_instance().notion_service.get_formazione_by_id(training_id)
+        if not training:
+            return jsonify({'error': 'Formazione non trovata'}), 404
+        return render_template('pages/participants.html',
+                               training=training, title='Partecipanti - Formazing')
+    except Exception:
+        logger.exception('Errore caricamento partecipanti')
+        flash('Dati partecipanti non disponibili.', 'error')
+        return redirect(url_for('main.dashboard'))
 
 
 @main.route('/guida')
@@ -359,6 +426,7 @@ async def preview_feedback_page(training_id):
 @admin_required
 async def confirm_notification(training_id):
     """Conferma ed esegue calendarizzazione con supporto a testi personalizzati."""
+    attempt = None
     try:
         logger.info(f"Conferma calendarizzazione | Training ID: {training_id}")
         
@@ -379,11 +447,15 @@ async def confirm_notification(training_id):
         logger.debug(f"Testi personalizzati ricevuti: Email={bool(custom_email_body)}, Telegram={len(custom_messages)} gruppi")
 
         # 2. Esecuzione tramite Service
+        journal = OperationJournal.configured()
+        actor = session['user'].get('preferred_username', '').casefold()
+        attempt = journal.begin(training_id, 'notification', actor)
         training_service = TrainingService.get_instance()
         result = await training_service.send_training_notification(
             training_id, 
             custom_messages=custom_messages,
-            custom_email_body=custom_email_body
+            custom_email_body=custom_email_body,
+            progress=attempt
         )
         
         logger.info(f"Calendarizzazione completata | ID: {training_id} | Codice: {result.get('codice_generato', 'N/A')}")
@@ -394,11 +466,18 @@ async def confirm_notification(training_id):
         flash('Comunicazione inviata con successo! La formazione è stata calendarizzata.', 'success')
         return redirect(url_for('main.dashboard'))
         
+    except DuplicateOperation as e:
+        flash(str(e), 'warning')
+        return redirect(url_for('main.operations'))
     except TrainingServiceError as e:
+        if attempt:
+            attempt.review()
         logger.error(f"Errore conferma calendarizzazione: {e}")
         flash(f'Errore: {e}', 'error')
         return redirect(url_for('main.dashboard'))
     except Exception as e:
+        if attempt:
+            attempt.review()
         logger.error(f"Errore imprevisto conferma calendarizzazione: {e}", exc_info=True)
         flash(f'Errore imprevisto: {e}', 'error')
         return redirect(url_for('main.dashboard'))
@@ -408,6 +487,7 @@ async def confirm_notification(training_id):
 @admin_required
 async def confirm_feedback(training_id):
     """Conferma ed esegue invio feedback con supporto a messaggi personalizzati."""
+    attempt = None
     try:
         logger.info(f"Conferma invio feedback | Training ID: {training_id}")
         
@@ -421,10 +501,14 @@ async def confirm_feedback(training_id):
                     custom_messages[group_key] = request.form.get(key)
 
         # 2. Esecuzione tramite Service
+        journal = OperationJournal.configured()
+        actor = session['user'].get('preferred_username', '').casefold()
+        attempt = journal.begin(training_id, 'feedback', actor)
         training_service = TrainingService.get_instance()
         result = await training_service.send_feedback_request(
             training_id,
-            custom_messages=custom_messages
+            custom_messages=custom_messages,
+            progress=attempt
         )
         
         logger.info(f"Feedback inviato con successo | ID: {training_id}")
@@ -435,11 +519,18 @@ async def confirm_feedback(training_id):
         flash('Richiesta feedback inviata con successo! La formazione è stata conclusa.', 'success')
         return redirect(url_for('main.dashboard'))
         
+    except DuplicateOperation as e:
+        flash(str(e), 'warning')
+        return redirect(url_for('main.operations'))
     except TrainingServiceError as e:
+        if attempt:
+            attempt.review()
         logger.error(f"Errore conferma feedback: {e}")
         flash(f'Errore: {e}', 'error')
         return redirect(url_for('main.dashboard'))
     except Exception as e:
+        if attempt:
+            attempt.review()
         logger.error(f"Errore imprevisto conferma feedback: {e}", exc_info=True)
         flash(f'Errore imprevisto: {e}', 'error')
         return redirect(url_for('main.dashboard'))
@@ -469,6 +560,64 @@ async def sync_attendance(training_id):
         logger.error(f"Errore imprevisto sincronizzazione partecipanti | ID: {training_id} | Error: {e}", exc_info=True)
         flash(f"Errore imprevisto durante la sincronizzazione: {e}", 'error')
         return redirect(url_for('main.dashboard'))
+
+
+
+# --- CENTRO OPERAZIONI: journal persistente / recovery selettivo ---
+
+@main.route('/operations')
+@admin_required
+def operations():
+    journal = OperationJournal.configured()
+    operation_id = request.args.get('id', '')[:64]
+    selected = journal.get(operation_id) if operation_id else None
+    events = journal.events(operation_id) if selected else []
+    return render_template(
+        'pages/operations.html',
+        records=journal.recent(),
+        selected=selected,
+        events=events,
+        title='Centro Operazioni - Formazing',
+    )
+
+
+@main.route('/operations/<operation_id>/reconcile-notion', methods=['POST'])
+@admin_required
+async def reconcile_operation_notion(operation_id):
+    """Retry only Notion after checking its remote state and persisted receipt."""
+    actor = session['user'].get('preferred_username', '').casefold()
+    try:
+        journal = OperationJournal.configured()
+        await reconcile_notion(
+            journal, operation_id, actor, TrainingService.get_instance()
+        )
+        cache.delete('dashboard_data_notion')
+        flash('Notion riconciliato. Verifica lo stato e i passaggi ancora pendenti.', 'success')
+    except (InvalidTransition, ValueError) as exc:
+        flash(str(exc), 'warning')
+    except Exception:
+        logger.exception('Riconciliazione Notion non completata')
+        flash('Operazione bloccata: controlla la situazione su Notion e nei provider.', 'error')
+    return redirect(url_for('main.operations', id=operation_id))
+
+
+@main.route('/operations/<operation_id>/resume-telegram', methods=['POST'])
+@admin_required
+async def resume_operation_telegram(operation_id):
+    """Never resend a batch whose outcome is already attempted or unknown."""
+    actor = session['user'].get('preferred_username', '').casefold()
+    try:
+        journal = OperationJournal.configured()
+        results = await resume_unsent_telegram(
+            journal, operation_id, actor, TrainingService.get_instance()
+        )
+        flash(f'Invio completato per {len(results)} gruppi. Nessun batch ripetuto.', 'success')
+    except (InvalidTransition, ValueError) as exc:
+        flash(str(exc), 'warning')
+    except Exception:
+        logger.exception('Invio Telegram da recovery non completato')
+        flash('Invio incerto. Verifica direttamente Telegram prima di qualsiasi intervento.', 'error')
+    return redirect(url_for('main.operations', id=operation_id))
 
 
 # --- API ENDPOINT: LOG VIEWER ---

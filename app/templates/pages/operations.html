@@ -1,0 +1,78 @@
+{% extends "layout/auth_required.html" %}
+
+{% block page_content %}
+<div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-4">
+    <div>
+        <h1 class="h3 text-blu-jemore fw-bold"><i class="bi bi-activity me-2"></i>Centro operazioni</h1>
+        <p class="text-muted mb-0">Registro persistente di invii, checkpoint e recuperi verificabili.</p>
+    </div>
+    <a href="{{ url_for('main.operations') }}" class="btn btn-outline-secondary btn-sm">Aggiorna</a>
+</div>
+
+<div class="alert alert-warning" role="status">
+    <strong>Nessun reinvio automatico.</strong> Una richiesta a Microsoft o Telegram può essere
+    stata consegnata anche se la connessione è caduta. Le operazioni in <em>Da verificare</em>
+    richiedono un controllo umano; soltanto i passaggi espressamente recuperabili
+    hanno un pulsante attivo.
+</div>
+
+{% if selected %}
+<div class="card-jemore p-4 mb-4">
+    <h2 class="h5 text-blu-jemore fw-bold mb-3">Dettaglio e cronologia</h2>
+    <p class="small text-muted mb-2">Formazione Notion: <code>{{ selected.training_id }}</code></p>
+    <p class="mb-2"><strong>{{ 'Calendarizzazione' if selected.action == 'notification' else 'Feedback' }}</strong>
+        · <span class="badge {{ 'bg-success' if selected.status == 'completed' else 'bg-warning text-dark' }}">
+            {{ selected.status }}</span> · <code>{{ selected.checkpoint }}</code></p>
+    {% if selected.status == 'needs_review' and selected.checkpoint in ('notion_pending', 'feedback_notion_pending') %}
+    <form method="post" action="{{ url_for('main.reconcile_operation_notion', operation_id=selected.id) }}"
+          onsubmit="return confirm('Verificare e, se necessario, aggiornare SOLO i campi Notion? Non verranno reinviati messaggi.');" class="mb-3">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-warning">Riconcilia solo Notion</button>
+    </form>
+    {% elif selected.status in ('ready_telegram', 'needs_review') and selected.checkpoint == 'telegram_not_started' %}
+    <form method="post" action="{{ url_for('main.resume_operation_telegram', operation_id=selected.id) }}"
+          onsubmit="return confirm('Inviare ORA Telegram con i template standard? Il registro certifica che questo passaggio non è stato tentato. Nessun testo personalizzato viene recuperato.');" class="mb-3">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-warning">Invia Telegram (prima esecuzione)</button>
+    </form>
+    {% endif %}
+    <p class="small text-muted">Le credenziali e i corpi dei messaggi non vengono salvati nel registro. Eventuali
+        esiti incerti di Teams/email/Telegram richiedono la verifica nei rispettivi provider.</p>
+    <ul class="list-group list-group-flush">
+        {% for event in events %}
+        <li class="list-group-item d-flex justify-content-between flex-wrap gap-2">
+            <span><code>{{ event.event }}</code> <small class="text-muted">· {{ event.actor }}</small></span>
+            <small class="text-muted">{{ event.occurred_at }}</small>
+        </li>
+        {% else %}
+        <li class="list-group-item text-muted">Nessun evento disponibile.</li>
+        {% endfor %}
+    </ul>
+</div>
+{% endif %}
+
+<div class="card-jemore p-3">
+    <h2 class="h5 text-blu-jemore fw-bold mb-3">Ultime 75 operazioni</h2>
+    <div class="table-responsive">
+        <table class="table table-hover align-middle">
+            <thead><tr><th>Registrata</th><th>Formazione</th><th>Azione</th><th>Stato</th><th>Ultimo checkpoint</th><th>Dettagli</th></tr></thead>
+            <tbody>
+            {% for record in records %}
+            <tr>
+                <td class="small">{{ record.updated_at }}</td>
+                <td><code class="small">{{ record.training_id }}</code></td>
+                <td>{{ 'Calendarizzazione' if record.action == 'notification' else 'Feedback' }}</td>
+                <td><span class="badge {{ 'bg-success' if record.status == 'completed' else 'bg-warning text-dark' if record.status in ('needs_review', 'ready_telegram') else 'bg-secondary' }}">
+                    {{ 'Completata' if record.status == 'completed' else 'Da verificare' if record.status == 'needs_review' else 'Telegram da inviare' if record.status == 'ready_telegram' else 'In corso' }}
+                </span></td>
+                <td><code class="small">{{ record.checkpoint }}</code></td>
+                <td><a href="{{ url_for('main.operations', id=record.id) }}" class="btn btn-sm btn-outline-primary">Apri</a></td>
+            </tr>
+            {% else %}
+            <tr><td colspan="6" class="text-center text-muted py-4">Nessuna operazione registrata.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

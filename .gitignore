@@ -14,3 +14,9 @@ venv.bak/
 .idea/
 *.log
 sequence_counter.txt
+
+# Durable private operation ledger (never version the SQLite DB or WAL files)
+var/
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm

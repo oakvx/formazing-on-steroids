@@ -1,0 +1,103 @@
+{% extends "layout/auth_required.html" %}
+
+{% block page_content %}
+<div class="d-flex flex-wrap justify-content-between gap-2 align-items-center mb-4">
+    <div>
+        <h1 class="h3 fw-bold text-blu-jemore"><i class="bi bi-calendar3 me-2"></i>Calendario formazioni</h1>
+        <p class="small text-muted mb-0">Dati sincronizzati da Notion (cache fino a 10 minuti). Calendario di sola lettura.</p>
+    </div>
+    <a href="{{ url_for('main.dashboard', force_refresh=1) }}" class="btn btn-sm btn-outline-secondary">Aggiorna Notion</a>
+</div>
+
+<div class="card-jemore p-3 mb-3">
+    <form action="{{ url_for('main.calendar_page') }}" method="get" class="row g-2 align-items-end">
+        <div class="col-sm-3">
+            <label for="calendar-month" class="form-label small">Mese</label>
+            <input id="calendar-month" name="month" class="form-control" type="month" value="{{ model.month }}" required>
+        </div>
+        <div class="col-sm-3">
+            <label for="calendar-search" class="form-label small">Cerca formazione / codice / partecipante</label>
+            <input id="calendar-search" name="q" class="form-control" type="search" maxlength="100"
+                   value="{{ model.query }}" placeholder="Nome o codice">
+        </div>
+        <div class="col-sm-2">
+            <label for="calendar-area" class="form-label small">Area</label>
+            <select id="calendar-area" name="area" class="form-select">
+                <option value="">Tutte le aree</option>
+                {% for area in model.areas %}
+                <option value="{{ area }}" {% if model.area == area %}selected{% endif %}>{{ area }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-sm-2">
+            <label for="calendar-status" class="form-label small">Stato</label>
+            <select id="calendar-status" name="status" class="form-select">
+                <option value="">Tutti</option>
+                {% for status in ('Programmata', 'Calendarizzata', 'Conclusa') %}
+                <option value="{{ status }}" {% if model.status == status %}selected{% endif %}>{{ status }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-sm-2"><button class="btn btn-jemore-dark-blu w-100" type="submit">Applica</button></div>
+    </form>
+</div>
+
+<div class="d-flex align-items-center justify-content-between mb-3">
+    <a class="btn btn-outline-secondary btn-sm"
+       href="{{ url_for('main.calendar_page', month=model.previous, q=model.query, area=model.area, status=model.status) }}">Mese precedente</a>
+    <h2 class="h5 mb-0 text-blu-jemore">Mese {{ model.month_label }}</h2>
+    <a class="btn btn-outline-secondary btn-sm"
+       href="{{ url_for('main.calendar_page', month=model.following, q=model.query, area=model.area, status=model.status) }}">Mese successivo</a>
+</div>
+
+<div class="card-jemore p-3 mb-4">
+    <div class="table-responsive">
+        <table class="table table-bordered align-top" style="min-width:780px;table-layout:fixed">
+            <thead>
+                <tr class="text-center small"><th>Lunedì</th><th>Martedì</th><th>Mercoledì</th><th>Giovedì</th><th>Venerdì</th><th>Sabato</th><th>Domenica</th></tr>
+            </thead>
+            <tbody>
+            {% for week in model.weeks %}
+                <tr>
+                {% for day in week %}
+                    <td class="{{ 'bg-light' if not day.in_month else '' }}" style="height:130px">
+                        <span class="small {{ 'fw-bold text-primary' if day.today else 'text-muted' }}">{{ day.day }}</span>
+                        {% for event in day.events %}
+                        <div class="border-start border-3 ps-2 my-2 py-1 bg-white">
+                            <div class="small fw-semibold">{{ event.time }} — {{ event.name }}</div>
+                            <div class="text-muted" style="font-size:0.7rem">{{ event.area }} · {{ event.status }}</div>
+                            {% if is_admin %}
+                            <a class="small" href="{{ url_for('main.participants_page', training_id=event.id) }}">Partecipanti</a>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    </td>
+                {% endfor %}
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% if model.conflicts %}
+<section class="card-jemore p-3 mb-4">
+    <h2 class="h5 text-blu-jemore">Possibili coincidenze o duplicati ({{ model.conflicts|length }})</h2>
+    <p class="small text-muted">Segnalazioni sulla stessa data e ora di inizio. Non sono verifiche di disponibilità Teams;
+        la durata registrata in Notion è legata alle presenze e non permette di dedurre un intervallo prenotato.</p>
+    <div class="table-responsive">
+        <table class="table table-sm">
+            <thead><tr><th>Data/ora</th><th>Formazioni</th><th>Motivo</th></tr></thead>
+            <tbody>
+            {% for conflict in model.conflicts %}
+            <tr><td>{{ conflict.when }}</td><td>{{ conflict.left_name }} / {{ conflict.right_name }}</td>
+                <td><span class="badge bg-warning text-dark">{{ conflict.reason }}</span></td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% else %}
+<p class="text-muted small">Nessuna coincidenza di orario rilevata nei dati disponibili.</p>
+{% endif %}
+{% endblock %}
